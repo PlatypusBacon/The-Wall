@@ -103,9 +103,9 @@ class HoldMarkerPainter extends CustomPainter {
           canvas, left, top, boxWidth, boxHeight, centerX, centerY);
     }
 
-    // Role icon above the box
+    // Role icon / sequence number above the box
     if (hold.isSelected && !isBeingEdited) {
-      _paintRoleIcon(canvas, hold.role, borderColor, centerX, top);
+      _paintRoleIcon(canvas, hold, borderColor, centerX, top);
     }
 
     // Confidence label below the box
@@ -145,7 +145,7 @@ class HoldMarkerPainter extends CustomPainter {
     }
   }
 
-  void _paintRoleIcon(Canvas canvas, HoldRole role, Color color,
+  void _paintRoleIcon(Canvas canvas, ClimbingHold hold, Color color,
       double centerX, double top) {
     const iconSize = 20.0;
     final iconX = centerX - iconSize / 2;
@@ -154,7 +154,37 @@ class HoldMarkerPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.fill;
 
-    switch (role) {
+    // If the hold has a sequence number, draw a filled circle with the number
+    // instead of the role icon so the user can see the tap order at a glance.
+    if (hold.selectionOrder != null) {
+      canvas.drawCircle(
+        Offset(iconX + iconSize / 2, iconY + iconSize / 2),
+        iconSize / 2,
+        paint,
+      );
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '${hold.selectionOrder}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(
+        canvas,
+        Offset(
+          iconX + iconSize / 2 - tp.width / 2,
+          iconY + iconSize / 2 - tp.height / 2,
+        ),
+      );
+      return;
+    }
+
+    // Fallback: role shape (no sequence number assigned)
+    switch (hold.role) {
       case HoldRole.start:
         canvas.drawPath(
           Path()

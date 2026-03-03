@@ -14,13 +14,17 @@ class SaveRouteScreen extends StatefulWidget {
   final Size? imageSize;
   final List<ClimbingHold> selectedHolds;
   final Function(ClimbingRoute) onSave;
+  final List<ClimbingHold> allHolds;
+  final ClimbingRoute? existingRoute;
 
   const SaveRouteScreen({
     super.key,
     this.imagePath,
     this.imageBytes,
     this.imageSize,
+    required this.allHolds,
     required this.selectedHolds,
+    this.existingRoute,
     required this.onSave,
   });
 
@@ -38,7 +42,18 @@ class _SaveRouteScreenState extends State<SaveRouteScreen> {
     'V0', 'V1', 'V2', 'V3', 'V4', 'V5',
     'V6', 'V7', 'V8', 'V9', 'V10+'
   ];
+  @override
+  void initState() {
+    super.initState();
 
+    // Pre-fill fields if editing an existing route
+    if (widget.existingRoute != null) {
+      final route = widget.existingRoute!;
+      _nameController.text = route.name;
+      _selectedDifficulty = route.difficulty;
+      _isSequenceClimb = route.isSequenceClimb;
+    }
+  }
   Future<void> _saveRoute() async {
     if (_nameController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -50,16 +65,20 @@ class _SaveRouteScreenState extends State<SaveRouteScreen> {
     setState(() => _isSaving = true);
 
     try {
-      final id = DateTime.now().millisecondsSinceEpoch.toString();
+      final isEditing = widget.existingRoute != null;
+      // Reuse original id when editing, generate new one when creating
+      final id = isEditing
+          ? widget.existingRoute!.id
+          : DateTime.now().millisecondsSinceEpoch.toString();
+
       final storageService = RouteStorageService();
 
-      // 1. Save wall image to disk
-      String imagePath = widget.imagePath ?? '';
-      if (widget.imageBytes != null) {
+      String imagePath = widget.imagePath ?? widget.existingRoute?.imagePath ?? '';
+      if (widget.imageBytes != null && !isEditing) {
+        // Only re-save the wall image if this is a new route
         imagePath = await storageService.saveWallImage(widget.imageBytes!, id);
       }
 
-      // 2. Generate annotated export
       String? annotatedPath;
       if (widget.imageBytes != null && widget.imageSize != null) {
         annotatedPath = await storageService.exportAnnotatedImage(
@@ -70,35 +89,43 @@ class _SaveRouteScreenState extends State<SaveRouteScreen> {
         );
       }
 
-      // 3. Persist to SQLite
       final savedRoute = SavedRoute(
         id: id,
         name: _nameController.text,
         difficulty: _selectedDifficulty,
-        holds: widget.selectedHolds,
+        allHolds: widget.allHolds,
+        selectedHolds: widget.selectedHolds,
         imagePath: imagePath,
+        imageBytes: widget.imageBytes ?? widget.existingRoute?.imageBytes,
         annotatedImagePath: annotatedPath,
-        createdAt: DateTime.now(),
+        createdAt: widget.existingRoute?.createdAt ?? DateTime.now(),
         imageSize: widget.imageSize ?? Size.zero,
+        isSequenceClimb: _isSequenceClimb,
       );
-      await RouteDatabase.instance.insertRoute(savedRoute);
 
-      // 4. Update in-memory state so UI reflects change immediately
+      // Update existing row or insert new one
+      if (isEditing) {
+        await RouteDatabase.instance.updateRoute(savedRoute);
+      } else {
+        await RouteDatabase.instance.insertRoute(savedRoute);
+      }
+
       widget.onSave(ClimbingRoute(
         id: id,
         name: _nameController.text,
         imagePath: imagePath,
-        imageBytes: widget.imageBytes,
+        imageBytes: widget.imageBytes ?? widget.existingRoute?.imageBytes,
         imageSize: widget.imageSize,
-        holds: widget.selectedHolds,
-        createdAt: DateTime.now(),
+        allHolds: widget.allHolds,
+        selectedHolds: widget.selectedHolds,
+        createdAt: widget.existingRoute?.createdAt ?? DateTime.now(),
         difficulty: _selectedDifficulty,
         isSequenceClimb: _isSequenceClimb,
       ));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Route saved successfully!')),
+          SnackBar(content: Text(isEditing ? 'Route updated!' : 'Route saved!')),
         );
         Navigator.popUntil(context, (route) => route.isFirst);
       }

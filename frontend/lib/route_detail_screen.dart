@@ -1,7 +1,10 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/rendering.dart';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:path_provider/path_provider.dart';
@@ -9,13 +12,14 @@ import 'package:share_plus/share_plus.dart';
 import 'data/climbing_models.dart';
 import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-
+import 'create_route.dart';
+import 'data/route_database.dart';
+import 'data/route_model.dart';
 
 class RouteDetailScreen extends StatefulWidget {
   final ClimbingRoute route;
 
   /// Optional callback invoked when the user deletes this route.
-  /// The parent (LibraryScreen) can listen to this to refresh its list.
   final VoidCallback? onDeleted;
 
   const RouteDetailScreen({
@@ -30,8 +34,6 @@ class RouteDetailScreen extends StatefulWidget {
 
 class _RouteDetailScreenState extends State<RouteDetailScreen> {
   final GlobalKey _stackKey = GlobalKey();
-
-  /// Key wrapping only the image + hold-overlay Stack — used for export.
   final GlobalKey _repaintKey = GlobalKey();
 
   Size? _displayedImageRect;
@@ -72,7 +74,32 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
       );
     });
   }
+  // --- Duplicate ------ (i cant do the chatgpt thing)
+  Future<void> _duplicateRoute() async {
+    final newId = DateTime.now().millisecondsSinceEpoch.toString();
+    final original = widget.route;
 
+    final duplicate = SavedRoute(
+      id: newId,
+      name: '${original.name} (copy)',
+      difficulty: original.difficulty,
+      allHolds: original.allHolds.map((h) => h.copy()).toList(),
+      selectedHolds: original.selectedHolds.map((h) => h.copy()).toList(),
+      imagePath: original.imagePath,
+      imageBytes: original.imageBytes,
+      imageSize: original.imageSize,
+      createdAt: DateTime.now(),
+      isSequenceClimb: original.isSequenceClimb,
+    );
+
+    await RouteDatabase.instance.insertRoute(duplicate);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('"${original.name} (copy)" saved to library')),
+      );
+    }
+  }
   // ── Delete ────────────────────────────────────────────────────────────────
 
   Future<void> _confirmDelete() async {
@@ -87,8 +114,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
               child: const Text('Cancel')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -96,7 +122,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
 
     if (confirmed == true && mounted) {
       widget.onDeleted?.call();
-      Navigator.pop(context); // return to library
+      Navigator.pop(context);
     }
   }
 
@@ -106,12 +132,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
     setState(() => _isExporting = true);
 
     try {
-      // Capture the RepaintBoundary widget as a ui.Image
       final boundary = _repaintKey.currentContext?.findRenderObject()
           as RenderRepaintBoundary?;
       if (boundary == null) throw Exception('Could not find render boundary');
 
-      // Use a higher pixel ratio for a crisper export (2× = "retina")
       final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
       final ByteData? byteData =
           await image.toByteData(format: ui.ImageByteFormat.png);
@@ -120,13 +144,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
       final pngBytes = byteData.buffer.asUint8List();
 
       if (kIsWeb) {
-        // On web there is no writable filesystem; fall back to share sheet.
         await Share.shareXFiles(
           [XFile.fromData(pngBytes, mimeType: 'image/png', name: '${widget.route.name}.png')],
           subject: widget.route.name,
         );
       } else {
-        // Write to a temp file, then share (share sheet includes Print on iOS).
         final dir = await getTemporaryDirectory();
         final safeName = widget.route.name
             .replaceAll(RegExp(r'[^\w\s-]'), '')
@@ -143,10 +165,56 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Export failed: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Export failed: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
+  Future<void> _saveImageToDevice() async {
+    setState(() => _isExporting = true);
+
+    try {
+      final boundary = _repaintKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) throw Exception('Could not find render boundary');
+
+      final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+      final ByteData? byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) throw Exception('Failed to encode image');
+
+      final pngBytes = byteData.buffer.asUint8List();
+
+      if (!kIsWeb) {
+        final PermissionStatus status = Platform.isAndroid
+            ? await Permission.photos.request()
+            : await Permission.storage.request();
+
+        if (!status.isGranted) throw Exception('Permission denied');
+
+        final result = await ImageGallerySaverPlus.saveImage(
+          pngBytes,
+          quality: 100,
+          name: widget.route.name.replaceAll(' ', '_'),
+        );
+
+        if (result == null || result['isSuccess'] != true) {
+          throw Exception('Save failed');
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Image saved to device')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -159,13 +227,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final route = widget.route;
+    log('isSequenceClimb: ${route.isSequenceClimb}');
 
     return Scaffold(
       appBar: AppBar(
         title: Text(route.name),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          // Export button
           _isExporting
               ? const Padding(
                   padding: EdgeInsets.all(12),
@@ -180,12 +248,37 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
                   tooltip: 'Export / Print',
                   onPressed: _shareImage,
                 ),
-          // Delete button
           IconButton(
             icon: const Icon(Icons.delete_outline),
             tooltip: 'Delete route',
             color: Colors.red[400],
             onPressed: _confirmDelete,
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit),
+            tooltip: 'Edit route',
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CreateRouteScreen(
+                    existingRoute: route,
+                    onRouteSaved: (updatedRoute) {
+                      setState(() {
+                        // replace route in parent storage
+                      });
+                    },
+                  ),
+                ),
+              );
+
+              if (mounted) setState(() {});
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.copy),
+            tooltip: 'Duplicate route',
+            onPressed: _duplicateRoute,
           ),
         ],
       ),
@@ -193,7 +286,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Image + hold overlay (also the export target) ─────────────
             RepaintBoundary(
               key: _repaintKey,
               child: SizedBox(
@@ -203,10 +295,27 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
                   key: _stackKey,
                   children: [
                     Positioned.fill(child: _buildImage(route)),
+                    // Connector lines drawn below hold boxes but above the image
+                    if (_displayedImageRect != null &&
+                        _displayedImageOffset != null &&
+                        route.isSequenceClimb)
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: _SequenceLinePainter(
+                            holds: route.selectedHolds,
+                            imageSize: route.imageSize!,
+                            displayedSize: _displayedImageRect!,
+                            displayedOffset: _displayedImageOffset!,
+                          ),
+                        ),
+                      ),
+
+                    // Hold boxes and numbers on top
                     if (_displayedImageRect != null &&
                         _displayedImageOffset != null)
                       ..._buildHoldMarkers(route),
-                    // Route name watermark — included in the export
+
+                    // Route name watermark
                     Positioned(
                       bottom: 8,
                       left: 10,
@@ -236,7 +345,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Tags
                   Wrap(
                     spacing: 8,
                     runSpacing: 4,
@@ -246,7 +354,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
                         backgroundColor:
                             Theme.of(context).colorScheme.primaryContainer,
                       ),
-                      Chip(label: Text('${route.holds.length} holds')),
+                      Chip(label: Text('${route.selectedHolds.length} holds')),
                       if (route.isSequenceClimb)
                         Chip(
                           label: const Text('Sequence'),
@@ -265,7 +373,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
                       _formatDate(route.createdAt)),
                   const SizedBox(height: 8),
                   _buildDetailRow(Icons.sports_handball, 'Total Holds',
-                      '${route.holds.length}'),
+                      '${route.selectedHolds.length}'),
                   const SizedBox(height: 8),
                   _buildDetailRow(
                       Icons.bar_chart, 'Difficulty', route.difficulty),
@@ -274,23 +382,24 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
                       _getAverageConfidence()),
                   const SizedBox(height: 24),
 
-                  // ── Export hint ──────────────────────────────────────────
                   OutlinedButton.icon(
                     onPressed: _isExporting ? null : _saveImageToDevice,
                     icon: const Icon(Icons.download),
-                    label: const Text('save annotated image to device for printing'),
+                    label: const Text(
+                        'save annotated image to device for printing'),
                   ),
                   const SizedBox(height: 24),
 
-                  // ── Hold Sequence ────────────────────────────────────────
                   if (route.isSequenceClimb) ...[
                     Text('Hold Sequence',
                         style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 12),
-                    ...route.holds
+                    // Holds are already sorted by selectionOrder when saved;
+                    // enumerate them with their stored selectionOrder number.
+                    ...route.selectedHolds
                         .asMap()
                         .entries
-                        .map((e) => _buildSequenceRow(e.key, e.value)),
+                        .map((e) => _buildSequenceRow(e.value)),
                   ],
                 ],
               ),
@@ -309,16 +418,19 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
     final offset = _displayedImageOffset!;
     final scale = dispSize.width / imgSize.width;
 
-    return route.holds.asMap().entries.map((entry) {
-      final index = entry.key;
-      final hold = entry.value;
-
+    return route.selectedHolds.map((hold) {
       final dispCX = hold.position.dx * scale + offset.dx;
       final dispCY = hold.position.dy * scale + offset.dy;
       final dispW = hold.width * scale;
       final dispH = hold.height * scale;
-
       final color = _roleColor(hold.role);
+
+      // The sequence number to display: use selectionOrder when available,
+      // otherwise fall back to list position + 1 for routes saved before
+      // the selectionOrder feature was introduced.
+      final selected = route.selectedHolds;
+      final displayNumber = hold.selectionOrder ??
+          (selected.indexOf(hold) + 1);
 
       return Positioned(
         left: dispCX - dispW / 2,
@@ -333,7 +445,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
           child: Center(
             child: route.isSequenceClimb
                 ? Text(
-                    '${index + 1}',
+                    '$displayNumber',
                     style: TextStyle(
                       color: color,
                       fontWeight: FontWeight.bold,
@@ -352,9 +464,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
 
   // ── Sequence list ─────────────────────────────────────────────────────────
 
-  Widget _buildSequenceRow(int index, ClimbingHold hold) {
+  /// Builds one row in the "Hold Sequence" list.
+  /// Uses [hold.selectionOrder] as the displayed step number, falling back
+  /// to list index + 1 for routes saved before the feature was introduced.
+  Widget _buildSequenceRow(ClimbingHold hold) {
     final color = _roleColor(hold.role);
     final roleText = _roleText(hold.role);
+    final displayNumber = hold.selectionOrder ??
+        (widget.route.selectedHolds.indexOf(hold) + 1);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -366,7 +483,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
             decoration: BoxDecoration(shape: BoxShape.circle, color: color),
             child: Center(
               child: Text(
-                '${index + 1}',
+                '$displayNumber',
                 style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -398,8 +515,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
             ),
           ),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
               color: _getConfidenceColor(hold.confidence),
               borderRadius: BorderRadius.circular(12),
@@ -520,11 +636,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
       '${date.day}/${date.month}/${date.year}';
 
   String _getAverageConfidence() {
-    if (widget.route.holds.isEmpty) return '0%';
-    final avg = widget.route.holds
+    if (widget.route.selectedHolds.isEmpty) return '0%';
+    final avg = widget.route.selectedHolds
             .map((h) => h.confidence)
             .reduce((a, b) => a + b) /
-        widget.route.holds.length;
+        widget.route.selectedHolds.length;
     return '${(avg * 100).toInt()}%';
   }
 
@@ -533,64 +649,170 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
     if (confidence >= 0.6) return Colors.orange;
     return Colors.red;
   }
-  Future<void> _saveImageToDevice() async {
-    setState(() => _isExporting = true);
+}
 
-    try {
-      final boundary = _repaintKey.currentContext?.findRenderObject()
-          as RenderRepaintBoundary?;
-      if (boundary == null) throw Exception('Could not find render boundary');
+// ── Sequence connector painter ────────────────────────────────────────────────
 
-      final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
-      final ByteData? byteData =
-          await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) throw Exception('Failed to encode image');
+/// Draws dashed lines with arrowheads between hold centres in sequence order.
+///
+/// Rendered as a [CustomPaint] layer sitting between the wall image and the
+/// hold-box widgets, so lines appear under the numbered boxes but above the
+/// photo. Also included inside the [RepaintBoundary] so exports capture them.
+class _SequenceLinePainter extends CustomPainter {
+  final List<ClimbingHold> holds;
+  final Size imageSize;
+  final Size displayedSize;
+  final Offset displayedOffset;
 
-      final pngBytes = byteData.buffer.asUint8List();
+  const _SequenceLinePainter({
+    required this.holds,
+    required this.imageSize,
+    required this.displayedSize,
+    required this.displayedOffset,
+  });
 
-      if (!kIsWeb) {
-        // Android permission handling
-        PermissionStatus status;
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (holds.length < 2) return;
 
-        if (Platform.isAndroid) {
-          // Android 13+
-          status = await Permission.photos.request();
-        } else {
-          // Older Android / iOS
-          status = await Permission.storage.request();
-        }
+    final scale = displayedSize.width / imageSize.width;
 
-        if (!status.isGranted) {
-          throw Exception('Permission denied');
-        }
+    // Sort by selectionOrder; fall back to list index for legacy routes.
+    final ordered = holds.toList()
+      ..sort((a, b) {
+        final ao = a.selectionOrder ?? holds.indexOf(a) + 1;
+        final bo = b.selectionOrder ?? holds.indexOf(b) + 1;
+        return ao.compareTo(bo);
+      });
 
-        final result = await ImageGallerySaverPlus.saveImage(
-          pngBytes,
-          quality: 100,
-          name: widget.route.name.replaceAll(' ', '_'),
+    // Convert image-space centre to display-space centre.
+    Offset toDisplay(ClimbingHold h) => Offset(
+          h.position.dx * scale + displayedOffset.dx,
+          h.position.dy * scale + displayedOffset.dy,
         );
 
-        if (result == null || result['isSuccess'] != true) {
-          throw Exception('Save failed');
-        }
-      }
+    final linePaint = Paint()
+      ..color = Colors.white.withOpacity(0.85)
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Image saved to device')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Save failed: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isExporting = false);
+    final shadowPaint = Paint()
+      ..color = Colors.black.withOpacity(0.45)
+      ..strokeWidth = 4.0
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    for (var i = 0; i < ordered.length - 1; i++) {
+      final from = toDisplay(ordered[i]);
+      final to = toDisplay(ordered[i + 1]);
+
+      // Shorten each end so the line starts/ends at the hold box edge
+      // rather than at the centre, keeping arrows clear of the number badge.
+      final shortened = _shortenSegment(
+        from, to,
+        startGap: ordered[i].width * scale / 2 + 4,
+        endGap: ordered[i + 1].width * scale / 2 + 4,
+      );
+      if (shortened == null) continue;
+
+      final (p1, p2) = shortened;
+
+      // Draw dashed shadow then dashed white line for contrast on any bg.
+      _drawDashed(canvas, p1, p2, shadowPaint);
+      _drawDashed(canvas, p1, p2, linePaint);
+
+      // Arrowhead at the destination end.
+      _drawArrowhead(canvas, p1, p2, shadowPaint, size: 10);
+      _drawArrowhead(canvas, p1, p2, linePaint, size: 8);
     }
   }
+
+  /// Returns shortened (start, end) points, or null if the holds overlap.
+  (Offset, Offset)? _shortenSegment(
+    Offset from,
+    Offset to, {
+    required double startGap,
+    required double endGap,
+  }) {
+    final dx = to.dx - from.dx;
+    final dy = to.dy - from.dy;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len <= startGap + endGap) return null;
+
+    final ux = dx / len;
+    final uy = dy / len;
+
+    return (
+      Offset(from.dx + ux * startGap, from.dy + uy * startGap),
+      Offset(to.dx - ux * endGap, to.dy - uy * endGap),
+    );
+  }
+
+  void _drawDashed(Canvas canvas, Offset from, Offset to, Paint paint) {
+    const dashLen = 8.0;
+    const gapLen = 5.0;
+
+    final dx = to.dx - from.dx;
+    final dy = to.dy - from.dy;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len == 0) return;
+
+    final ux = dx / len;
+    final uy = dy / len;
+
+    double travelled = 0;
+    bool drawing = true;
+
+    while (travelled < len) {
+      final segLen = drawing ? dashLen : gapLen;
+      final end = (travelled + segLen).clamp(0.0, len);
+      if (drawing) {
+        canvas.drawLine(
+          Offset(from.dx + ux * travelled, from.dy + uy * travelled),
+          Offset(from.dx + ux * end, from.dy + uy * end),
+          paint,
+        );
+      }
+      travelled += segLen;
+      drawing = !drawing;
+    }
+  }
+
+  void _drawArrowhead(Canvas canvas, Offset from, Offset to, Paint paint,
+      {double size = 8}) {
+    final dx = to.dx - from.dx;
+    final dy = to.dy - from.dy;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len == 0) return;
+
+    final ux = dx / len;
+    final uy = dy / len;
+
+    final wing1 = Offset(
+      to.dx - ux * size - uy * (size * 0.5),
+      to.dy - uy * size + ux * (size * 0.5),
+    );
+    final wing2 = Offset(
+      to.dx - ux * size + uy * (size * 0.5),
+      to.dy - uy * size - ux * (size * 0.5),
+    );
+
+    canvas.drawPath(
+      Path()
+        ..moveTo(to.dx, to.dy)
+        ..lineTo(wing1.dx, wing1.dy)
+        ..lineTo(wing2.dx, wing2.dy)
+        ..close(),
+      Paint()
+        ..color = paint.color
+        ..style = PaintingStyle.fill,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SequenceLinePainter old) =>
+      old.holds != holds ||
+      old.displayedSize != displayedSize ||
+      old.displayedOffset != displayedOffset;
 }

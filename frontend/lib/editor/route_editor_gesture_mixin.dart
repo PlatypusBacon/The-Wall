@@ -20,6 +20,11 @@ mixin RouteEditorGestureMixin<T extends StatefulWidget> on State<T> {
   HoldRole get currentSelectionMode;
   TransformationController get transformationController;
 
+  /// Returns the next selection-order number to assign.
+  /// Implemented by the host as the count of currently selected holds + 1,
+  /// so numbers are always gapless at the moment of assignment.
+  int get nextSelectionOrder;
+
   // Mutable gesture state — owned by the host, written by this mixin.
   EditorGestureMode gestureMode = EditorGestureMode.idle;
   Offset? lastDragPosition;
@@ -42,15 +47,35 @@ mixin RouteEditorGestureMixin<T extends StatefulWidget> on State<T> {
         editingHold = tapped;
       } else {
         if (!tapped.isSelected) {
+          // Selecting for the first time — stamp with the next order number.
           tapped.isSelected = true;
           tapped.role = currentSelectionMode;
+          tapped.selectionOrder = nextSelectionOrder;
         } else if (tapped.role == currentSelectionMode) {
+          // Tapping same role again deselects. Clear its number then compact
+          // remaining holds so the sequence stays gapless (1, 2, 3, …).
           tapped.isSelected = false;
+          tapped.selectionOrder = null;
+          _repackSelectionOrder();
         } else {
+          // Switching role on an already-selected hold. Order is preserved —
+          // position in the sequence doesn't change, only the label does.
           tapped.role = currentSelectionMode;
         }
       }
     });
+  }
+
+  /// Renumbers selected holds in ascending order after a deselection,
+  /// so sequence numbers are always gapless.
+  void _repackSelectionOrder() {
+    final selected = detectedHolds
+        .where((h) => h.isSelected && h.selectionOrder != null)
+        .toList()
+      ..sort((a, b) => a.selectionOrder!.compareTo(b.selectionOrder!));
+    for (var i = 0; i < selected.length; i++) {
+      selected[i].selectionOrder = i + 1;
+    }
   }
 
   // ── Pan (add-hold box drawing) ───────────────────────────────────────────

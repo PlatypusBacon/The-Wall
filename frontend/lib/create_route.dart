@@ -3,21 +3,21 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:typed_data';
-import '../data/climbing_models.dart';
-import '../utils/hold_detection_service.dart';
-import '../widgets/hold_marker_painter.dart';
-import '../widgets/editor_toolbar.dart';
-import '../widgets/hold_role_selector.dart';
-import '../widgets/editing_hold_panel.dart';
-import '../save_route_screen.dart';
-import '../editor/editor_mode.dart';
-import '../editor/route_editor_gesture_mixin.dart';
-import '../data/quotes.dart';
+import 'data/climbing_models.dart';
+import 'utils/hold_detection_service.dart';
+import 'widgets/hold_marker_painter.dart';
+import 'widgets/editor_toolbar.dart';
+import 'widgets/hold_role_selector.dart';
+import 'widgets/editing_hold_panel.dart';
+import 'save_route_screen.dart';
+import 'editor/editor_mode.dart';
+import 'editor/route_editor_gesture_mixin.dart';
+import 'data/quotes.dart';
 
 class CreateRouteScreen extends StatefulWidget {
   final Function(ClimbingRoute) onRouteSaved;
-
-  const CreateRouteScreen({super.key, required this.onRouteSaved});
+  final ClimbingRoute? existingRoute;
+  const CreateRouteScreen({super.key, required this.onRouteSaved, this.existingRoute});
 
   @override
   State<CreateRouteScreen> createState() => _CreateRouteScreenState();
@@ -62,13 +62,24 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
 
   @override
   bool isAddingHold = false;
+  bool get isEditMode => widget.existingRoute != null;
+  /// Implements the mixin contract: the next sequence number is always
+  /// one more than the count of holds already selected.
+  @override
+  int get nextSelectionOrder =>
+      detectedHolds.where((h) => h.isSelected).length;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    _checkServerHealth();
+
+    if (isEditMode) {
+      _loadExistingRoute();
+    } else {
+      _checkServerHealth();
+    }
   }
 
   @override
@@ -76,7 +87,23 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
     transformationController.dispose();
     super.dispose();
   }
+  void _loadExistingRoute() {
+    final route = widget.existingRoute!;
 
+    setState(() {
+      detectedHolds = route.allHolds.map((h) => h.copy()).toList();
+      imageSize = route.imageSize;
+
+      _selectedImageBytes = route.imageBytes;
+
+      if (!kIsWeb && route.imagePath.isNotEmpty) {
+        _selectedImage = File(route.imagePath);
+      }
+
+      _isAnalyzing = false;
+      _errorMessage = null;
+    });
+}
   Future<void> _checkServerHealth() async {
     final isHealthy = await _detectionService.healthCheck();
     if (!isHealthy && mounted) {
@@ -224,8 +251,15 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
   // ── Navigation ────────────────────────────────────────────────────────────
 
   void _createRoute() {
-    final selectedHolds =
-        detectedHolds.where((hold) => hold.isSelected).toList();
+    final selectedHolds = detectedHolds
+        .where((hold) => hold.isSelected)
+        .toList()
+      ..sort((a, b) {
+        final aOrder = a.selectionOrder ?? double.maxFinite.toInt();
+        final bOrder = b.selectionOrder ?? double.maxFinite.toInt();
+        return aOrder.compareTo(bOrder);
+      });
+
     if (selectedHolds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select at least one hold')),
@@ -240,7 +274,12 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
           imagePath: _selectedImage?.path,
           imageBytes: _selectedImageBytes,
           imageSize: imageSize,
+
+          // IMPORTANT: pass ALL holds, not just selected
+          allHolds: detectedHolds,
           selectedHolds: selectedHolds,
+
+          existingRoute: widget.existingRoute, // NEW
           onSave: widget.onRouteSaved,
         ),
       ),
@@ -253,10 +292,10 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create Route'),
+        title: Text(isEditMode ? 'Edit Route' : 'Create Route'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          if (_selectedImageBytes != null && !_isAnalyzing)
+          if (!isEditMode && _selectedImageBytes != null && !_isAnalyzing)
             IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: _detectHolds,
@@ -265,11 +304,32 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
         ],
       ),
       body: _selectedImageBytes == null
-          ? _buildEmptyState()
-          : _buildImageAnalysis(),
+      ? (isEditMode ? _buildLoadingOrError() : _buildEmptyState())
+      : _buildImageAnalysis(),
     );
   }
-
+  Widget _buildLoadingOrError() {
+    // imageBytes not available — show a clear message instead of blank screen
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.image_not_supported, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          const Text(
+            'Image data not available.\nPlease re-create this route.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Go Back'),
+          ),
+        ],
+      ),
+    );
+  }
   // ── Empty state ───────────────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
@@ -282,13 +342,13 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
       ),
       child: Center(
         child: Container(
-          width: 220,
+          width: 250,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                getRandomMessage(),
+                getHourlyMessage(),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
@@ -438,6 +498,8 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
   }
 
   /// Called by [handleGestureEnd] when a valid new-hold box has been drawn.
+  /// Manually drawn holds are pre-selected, so they receive a sequence number
+  /// immediately using the same counter as tapped holds.
   void _commitNewHold() {
     if (newHoldStart == null || lastDragPosition == null) return;
     final hold = ClimbingHold(
@@ -451,6 +513,7 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
       height: (lastDragPosition!.dy - newHoldStart!.dy).abs(),
       isSelected: true,
       role: currentSelectionMode,
+      selectionOrder: nextSelectionOrder,
     );
     setState(() => detectedHolds.add(hold));
   }

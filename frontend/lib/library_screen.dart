@@ -148,7 +148,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                   MaterialTapTargetSize.shrinkWrap,
                             ),
                             const SizedBox(width: 8),
-                            Text('${route.holds.length} holds',
+                            Text('${route.selectedHolds.length} holds',
                                 style: TextStyle(
                                     color: Colors.grey[600], fontSize: 14)),
                           ],

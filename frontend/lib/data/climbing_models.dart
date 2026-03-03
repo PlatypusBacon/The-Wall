@@ -11,7 +11,19 @@ class ClimbingHold {
   double height;
   bool isSelected;
   HoldRole role;
-
+  int? selectionOrder; // null if not part of the sequence
+  ClimbingHold copy() {
+    return ClimbingHold(
+      id: id,
+      position: Offset(position.dx, position.dy), // ensure new instance
+      confidence: confidence,
+      width: width,
+      height: height,
+      isSelected: isSelected,
+      role: role,
+      selectionOrder: selectionOrder,
+    );
+  }
   ClimbingHold({
     required this.id,
     required this.position,
@@ -20,6 +32,7 @@ class ClimbingHold {
     this.height = 40.0,
     this.isSelected = false,
     this.role = HoldRole.middle,
+    this.selectionOrder
   });
 
   Map<String, dynamic> toMap() => {
@@ -31,7 +44,9 @@ class ClimbingHold {
     'height': height,
     'is_selected': isSelected ? 1 : 0,
     'role': role.name,
+    'selectionOrder': selectionOrder,
   };
+
 
   factory ClimbingHold.fromMap(Map<String, dynamic> map) => ClimbingHold(
     id: map['id'],
@@ -41,6 +56,7 @@ class ClimbingHold {
     height: map['height'],
     isSelected: map['is_selected'] == 1,
     role: HoldRole.values.byName(map['role']),
+    selectionOrder: map['selectionOrder'] as int?,
   );
 }
 
@@ -50,7 +66,8 @@ class ClimbingRoute {
   final String imagePath;
   final Uint8List? imageBytes;
   final Size? imageSize;  // fixed: belongs here, not super
-  final List<ClimbingHold> holds;
+  final List<ClimbingHold> allHolds;
+  final List<ClimbingHold> selectedHolds;
   final DateTime createdAt;
   final String difficulty;
   final bool isSequenceClimb;
@@ -61,7 +78,8 @@ class ClimbingRoute {
     required this.imagePath,
     this.imageBytes,
     this.imageSize,
-    required this.holds,
+    required this.allHolds,
+    required this.selectedHolds,
     required this.createdAt,
     this.difficulty = 'V0',
     this.isSequenceClimb = false,
