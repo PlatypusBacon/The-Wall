@@ -15,6 +15,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'create_route.dart';
 import 'data/route_database.dart';
 import 'data/route_model.dart';
+import 'data/auth_service.dart';
+import 'data/friends_service.dart';
 
 class RouteDetailScreen extends StatefulWidget {
   final ClimbingRoute route;
@@ -234,20 +236,57 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
         title: Text(route.name),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          _isExporting
-              ? const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : IconButton(
-                  icon: const Icon(Icons.ios_share),
-                  tooltip: 'Export / Print',
-                  onPressed: _shareImage,
-                ),
+          if (_isExporting)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: SizedBox(width: 20, height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+            )
+          else ...[
+            // Export image — always visible
+            IconButton(
+              icon: const Icon(Icons.ios_share),
+              tooltip: 'Export image',
+              onPressed: _shareImage,
+            ),
+            // Share with friends — only when logged in
+            if (AuthService.instance.isLoggedIn)
+              FutureBuilder<bool>(
+                future: FriendsService.instance.isRouteShared(widget.route.id),
+                builder: (context, snapshot) {
+                  final isShared = snapshot.data ?? false;
+                  return IconButton(
+                    icon: Icon(isShared ? Icons.public : Icons.public_off),
+                    tooltip: isShared
+                        ? 'Shared with friends (tap to unshare)'
+                        : 'Share with friends',
+                    onPressed: () async {
+                      if (isShared) {
+                        await FriendsService.instance.unshareRoute(widget.route.id);
+                      } else {
+                        String? imageUrl;
+                        if (widget.route.imageBytes != null) {
+                          imageUrl = await FriendsService.instance
+                              .uploadRouteImage(widget.route.id, widget.route.imageBytes!);
+                        }
+                        await FriendsService.instance
+                            .shareRoute(widget.route, imageUrl ?? '');
+                      }
+                      setState(() {});
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(isShared
+                                ? 'Route unshared'
+                                : 'Route shared with friends!'),
+                          ),
+                        );
+                      }
+                    },
+                  );
+                },
+              ),
+          ],
           IconButton(
             icon: const Icon(Icons.delete_outline),
             tooltip: 'Delete route',
@@ -264,14 +303,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
                   builder: (context) => CreateRouteScreen(
                     existingRoute: route,
                     onRouteSaved: (updatedRoute) {
-                      setState(() {
-                        // replace route in parent storage
-                      });
+                      setState(() {});
                     },
                   ),
                 ),
               );
-
               if (mounted) setState(() {});
             },
           ),

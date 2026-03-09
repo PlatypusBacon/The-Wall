@@ -291,21 +291,10 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(isEditMode ? 'Edit Route' : 'Create Route'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        actions: [
-          if (!isEditMode && _selectedImageBytes != null && !_isAnalyzing)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: _detectHolds,
-              tooltip: 'Re-analyze',
-            ),
-        ],
-      ),
+      // appBar removed — title is now in HomeScreen's AppBar
       body: _selectedImageBytes == null
-      ? (isEditMode ? _buildLoadingOrError() : _buildEmptyState())
-      : _buildImageAnalysis(),
+          ? (isEditMode ? _buildLoadingOrError() : _buildEmptyState())
+          : _buildImageAnalysis(),
     );
   }
   Widget _buildLoadingOrError() {
@@ -333,47 +322,54 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
   // ── Empty state ───────────────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
-    return Container(
-      decoration: const BoxDecoration(
-        image: DecorationImage(
-          image: AssetImage('assets/background.png'),
-          fit: BoxFit.cover,
-        ),
-      ),
-      child: Center(
-        child: Container(
-          width: 250,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                getHourlyMessage(),
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
+    return Center(
+      child: AspectRatio(
+        aspectRatio: 1080 / 1920,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Image.asset(
+                'assets/background.png',
+                fit: BoxFit.contain,
               ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _selectImage,
-                  style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14)),
-                  child: const Text('Gallery'),
+            ),
+            Align(
+              alignment: const Alignment(0, -0.05),
+              child: SizedBox(
+                width: 250,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      getHourlyMessage(),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+
+                    const SizedBox(height: 5),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _selectImage,
+                            child: const Text("Gallery"),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _takePicture,
+                            child: const Text("Camera"),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _takePicture,
-                  style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14)),
-                  child: const Text('Camera'),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -7,6 +7,8 @@ import 'widgets/annotation_painter.dart';
 import 'data/route_model.dart';
 import 'data/route_database.dart';
 import 'data/storage_service.dart';
+import 'data/auth_service.dart';
+import 'data/friends_service.dart';
 
 class SaveRouteScreen extends StatefulWidget {
   final String? imagePath;
@@ -37,6 +39,7 @@ class _SaveRouteScreenState extends State<SaveRouteScreen> {
   String _selectedDifficulty = 'V0';
   bool _isSequenceClimb = false;
   bool _isSaving = false;
+  bool _isPublic = false;
 
   final List<String> _difficulties = [
     'V0', 'V1', 'V2', 'V3', 'V4', 'V5',
@@ -52,6 +55,13 @@ class _SaveRouteScreenState extends State<SaveRouteScreen> {
       _nameController.text = route.name;
       _selectedDifficulty = route.difficulty;
       _isSequenceClimb = route.isSequenceClimb;
+      if (AuthService.instance.isLoggedIn) {
+        FriendsService.instance
+            .isRouteShared(widget.existingRoute!.id)
+            .then((shared) {
+          if (mounted) setState(() => _isPublic = shared);
+        });
+      }
     }
   }
   Future<void> _saveRoute() async {
@@ -127,6 +137,45 @@ class _SaveRouteScreenState extends State<SaveRouteScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(isEditing ? 'Route updated!' : 'Route saved!')),
         );
+        // Handle sharing/unsharing
+        if (AuthService.instance.isLoggedIn) {
+          try {
+            if (_isPublic) {
+              // Upload image and share the route
+              final bytes = widget.imageBytes ?? widget.existingRoute?.imageBytes;
+              if (bytes != null) {
+                final imageUrl = await FriendsService.instance.uploadRouteImage(id, bytes);
+                if (imageUrl != null) {
+                  await FriendsService.instance.shareRoute(
+                    ClimbingRoute(
+                      id: id,
+                      name: _nameController.text,
+                      imagePath: imagePath,
+                      imageBytes: bytes,
+                      imageSize: widget.imageSize,
+                      allHolds: widget.allHolds,
+                      selectedHolds: widget.selectedHolds,
+                      createdAt: widget.existingRoute?.createdAt ?? DateTime.now(),
+                      difficulty: _selectedDifficulty,
+                      isSequenceClimb: _isSequenceClimb,
+                    ),
+                    imageUrl,
+                  );
+                }
+              }
+            } else {
+              // Unshare if toggle was turned off
+              await FriendsService.instance.unshareRoute(id);
+            }
+          } catch (e) {
+            // Non-fatal — route is still saved locally
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Route saved, but sharing failed: $e')),
+              );
+            }
+          }
+        }
         Navigator.popUntil(context, (route) => route.isFirst);
       }
     } catch (e) {
@@ -216,6 +265,21 @@ class _SaveRouteScreenState extends State<SaveRouteScreen> {
                   controlAffinity: ListTileControlAffinity.leading,
                 ),
               ),
+              // Only show share toggle if logged in
+              if (AuthService.instance.isLoggedIn)
+                Card(
+                  child: CheckboxListTile(
+                    value: _isPublic,
+                    onChanged: (v) => setState(() => _isPublic = v ?? false),
+                    title: const Text('Share with Friends',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text(
+                        'Friends can see this route in their feed',
+                        style: TextStyle(fontSize: 12)),
+                    secondary: const Icon(Icons.people_outline),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ),
               const SizedBox(height: 16),
               Card(
                 child: Padding(

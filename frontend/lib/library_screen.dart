@@ -41,10 +41,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Route Library'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _routes.isEmpty
