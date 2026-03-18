@@ -62,6 +62,6 @@ def convert_via_to_training(via_json_path, output_dir):
 
         print(f"Converted {filename}")
 if __name__ == "__main__":
-    via_json_path = "data/threemore.json"
+    via_json_path = "data/318.json"
     output_dir = "data/label/test"
     convert_via_to_training(via_json_path, output_dir)

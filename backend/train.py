@@ -65,7 +65,7 @@ def augment_climbing_image(image, boxes, img_size=(320, 320)):
     Returns:
         aug_image (float32 [0,1]), aug_boxes (list of [y1,x1,y2,x2])
     """
-    if np.random.rand() < 0.7:
+    if np.random.rand() < 0.4:
         image, boxes = _random_perspective(image, boxes, severity=0.15)
     if np.random.rand() < 0.8:
         image = _random_brightness_contrast(image)

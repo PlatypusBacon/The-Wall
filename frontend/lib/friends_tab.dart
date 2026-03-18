@@ -6,8 +6,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_screen.dart';
 import 'dart:async';
 import 'shared_route_detail_screen.dart';
+
 // At the top of friends_tab.dart, outside the classes:
-final GlobalKey<_FriendsListTabState> friendsListKey = GlobalKey<_FriendsListTabState>();
+final GlobalKey<_FriendsListTabState> friendsListKey =
+    GlobalKey<_FriendsListTabState>();
+
 class FriendsTab extends StatefulWidget {
   const FriendsTab({super.key});
 
@@ -18,8 +21,6 @@ class FriendsTab extends StatefulWidget {
 class _FriendsTabState extends State<FriendsTab>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-
-  // In _FriendsTabState, add:
   late final StreamSubscription<AuthState> _authSub;
 
   @override
@@ -31,7 +32,6 @@ class _FriendsTabState extends State<FriendsTab>
         friendsListKey.currentState?._load();
       }
     });
-    // Rebuild when auth state changes
     _authSub = AuthService.instance.authStateChanges.listen((_) {
       if (mounted) setState(() {});
     });
@@ -119,7 +119,12 @@ class _FriendsFeedTabState extends State<_FriendsFeedTab> {
     setState(() => _loading = true);
     try {
       final routes = await FriendsService.instance.getFriendsRoutes();
-      if (mounted) setState(() { _routes = routes; _loading = false; });
+      if (mounted) {
+        setState(() {
+          _routes = routes;
+          _loading = false;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
@@ -153,7 +158,8 @@ class _FriendsFeedTabState extends State<_FriendsFeedTab> {
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => SharedRouteDetailScreen(routeData: _routes[i]),
+              builder: (_) =>
+                  SharedRouteDetailScreen(routeData: _routes[i]),
             ),
           ),
           child: _SharedRouteCard(route: _routes[i]),
@@ -197,7 +203,8 @@ class _SharedRouteCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const CircleAvatar(radius: 14, child: Icon(Icons.person, size: 14)),
+                    const CircleAvatar(
+                        radius: 14, child: Icon(Icons.person, size: 14)),
                     const SizedBox(width: 8),
                     Text('@$username',
                         style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -218,7 +225,8 @@ class _SharedRouteCard extends StatelessWidget {
                     if (route['is_sequence_climb'] == true)
                       Chip(
                         label: const Text('Sequence'),
-                        avatar: const Icon(Icons.format_list_numbered, size: 14),
+                        avatar: const Icon(Icons.format_list_numbered,
+                            size: 14),
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         padding: EdgeInsets.zero,
                         backgroundColor: Colors.purple[100],
@@ -267,7 +275,12 @@ class _FriendsListTabState extends State<_FriendsListTab> {
     setState(() => _loading = true);
     try {
       final friends = await FriendsService.instance.getFriends();
-      if (mounted) setState(() { _friends = friends; _loading = false; });
+      if (mounted) {
+        setState(() {
+          _friends = friends;
+          _loading = false;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
@@ -277,7 +290,11 @@ class _FriendsListTabState extends State<_FriendsListTab> {
     final query = _searchController.text.trim();
     if (query.isEmpty) return;
 
-    setState(() { _searching = true; _searchResult = null; _searchError = null; });
+    setState(() {
+      _searching = true;
+      _searchResult = null;
+      _searchError = null;
+    });
 
     try {
       final result = await FriendsService.instance.findByUsername(query);
@@ -294,7 +311,12 @@ class _FriendsListTabState extends State<_FriendsListTab> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() { _searching = false; _searchError = e.toString(); });
+      if (mounted) {
+        setState(() {
+          _searching = false;
+          _searchError = e.toString();
+        });
+      }
     }
   }
 
@@ -317,17 +339,21 @@ class _FriendsListTabState extends State<_FriendsListTab> {
     }
   }
 
-  Future<void> _removeFriend(String friendshipId, String username) async {
+  Future<void> _removeFriend(
+      String friendshipId, String username) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Remove Friend'),
         content: Text('Remove @$username from your friends?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Remove', style: TextStyle(color: Colors.red)),
+            child:
+                const Text('Remove', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -363,8 +389,11 @@ class _FriendsListTabState extends State<_FriendsListTab> {
               FilledButton(
                 onPressed: _searching ? null : _search,
                 child: _searching
-                    ? const SizedBox(width: 16, height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
                     : const Text('Find'),
               ),
             ],
@@ -375,7 +404,8 @@ class _FriendsListTabState extends State<_FriendsListTab> {
         if (_searchError != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Text(_searchError!, style: const TextStyle(color: Colors.red)),
+            child: Text(_searchError!,
+                style: const TextStyle(color: Colors.red)),
           ),
         if (_searchResult != null)
           Card(
@@ -394,7 +424,8 @@ class _FriendsListTabState extends State<_FriendsListTab> {
 
         // Friends list
         if (_loading)
-          const Expanded(child: Center(child: CircularProgressIndicator()))
+          const Expanded(
+              child: Center(child: CircularProgressIndicator()))
         else if (_friends.isEmpty)
           const Expanded(
             child: Center(
@@ -412,12 +443,33 @@ class _FriendsListTabState extends State<_FriendsListTab> {
                 itemBuilder: (context, i) {
                   final f = _friends[i];
                   return ListTile(
-                    leading: const CircleAvatar(child: Icon(Icons.person)),
+                    leading:
+                        const CircleAvatar(child: Icon(Icons.person)),
                     title: Text('@${f['username']}'),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.person_remove_outlined, color: Colors.red),
-                      tooltip: 'Remove friend',
-                      onPressed: () => _removeFriend(f['friendship_id'], f['username']),
+                    // Chevron hints that the row is tappable.
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.person_remove_outlined,
+                              color: Colors.red),
+                          tooltip: 'Remove friend',
+                          onPressed: () =>
+                              _removeFriend(f['friendship_id'], f['username']),
+                        ),
+                        const Icon(Icons.chevron_right,
+                            color: Colors.grey),
+                      ],
+                    ),
+                    // Tap → open that friend's personal route feed.
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => FriendRoutesScreen(
+                          userId: f['id'] as String,
+                          username: f['username'] as String,
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -425,6 +477,102 @@ class _FriendsListTabState extends State<_FriendsListTab> {
             ),
           ),
       ],
+    );
+  }
+}
+
+// ── Friend routes screen ──────────────────────────────────────────────────────
+
+/// Displays all routes shared by a single friend.
+class FriendRoutesScreen extends StatefulWidget {
+  final String userId;
+  final String username;
+
+  const FriendRoutesScreen({
+    super.key,
+    required this.userId,
+    required this.username,
+  });
+
+  @override
+  State<FriendRoutesScreen> createState() => _FriendRoutesScreenState();
+}
+
+class _FriendRoutesScreenState extends State<FriendRoutesScreen> {
+  List<Map<String, dynamic>> _routes = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      // Fetch all friends' routes then filter to just this user.
+      // If FriendsService gains a per-user method in the future, swap it here.
+      final all = await FriendsService.instance.getFriendsRoutes();
+      final filtered = all
+          .where((r) => r['user_id'] == widget.userId)
+          .toList();
+      if (mounted) {
+        setState(() {
+          _routes = filtered;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('@${widget.username}\'s Routes'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _routes.isEmpty
+              ? _buildEmpty()
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: _routes.length,
+                    itemBuilder: (context, i) => GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SharedRouteDetailScreen(
+                              routeData: _routes[i]),
+                        ),
+                      ),
+                      child: _SharedRouteCard(route: _routes[i]),
+                    ),
+                  ),
+                ),
+    );
+  }
+
+  Widget _buildEmpty() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.route, size: 56, color: Colors.grey[400]),
+          const SizedBox(height: 12),
+          Text(
+            '@${widget.username} hasn\'t shared any routes yet.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.grey),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -452,7 +600,12 @@ class _PendingRequestsTabState extends State<_PendingRequestsTab> {
     setState(() => _loading = true);
     try {
       final pending = await FriendsService.instance.getPendingIncoming();
-      if (mounted) setState(() { _pending = pending; _loading = false; });
+      if (mounted) {
+        setState(() {
+          _pending = pending;
+          _loading = false;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
@@ -485,7 +638,10 @@ class _PendingRequestsTabState extends State<_PendingRequestsTab> {
         itemCount: _pending.length,
         itemBuilder: (context, i) {
           final req = _pending[i];
-          final username = req['profiles!friendships_requester_id_fkey']?['username'] ?? 'unknown';          return Card(
+          final username =
+              req['profiles!friendships_requester_id_fkey']?['username'] ??
+                  'unknown';
+          return Card(
             child: ListTile(
               leading: const CircleAvatar(child: Icon(Icons.person)),
               title: Text('@$username'),
@@ -494,7 +650,8 @@ class _PendingRequestsTabState extends State<_PendingRequestsTab> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.check_circle, color: Colors.green),
+                    icon:
+                        const Icon(Icons.check_circle, color: Colors.green),
                     tooltip: 'Accept',
                     onPressed: () => _respond(req['id'], true),
                   ),

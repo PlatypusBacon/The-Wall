@@ -6,6 +6,37 @@ import 'data/route_model.dart';
 import 'data/route_database.dart';
 import 'route_detail_screen.dart';
 
+// Sort options available in the library.
+enum _SortOption { nameAsc, nameDesc, dateNewest, dateOldest }
+
+extension _SortOptionLabel on _SortOption {
+  String get label {
+    switch (this) {
+      case _SortOption.nameAsc:
+        return 'Name (A → Z)';
+      case _SortOption.nameDesc:
+        return 'Name (Z → A)';
+      case _SortOption.dateNewest:
+        return 'Date (newest first)';
+      case _SortOption.dateOldest:
+        return 'Date (oldest first)';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case _SortOption.nameAsc:
+        return Icons.sort_by_alpha;
+      case _SortOption.nameDesc:
+        return Icons.sort_by_alpha;
+      case _SortOption.dateNewest:
+        return Icons.calendar_today;
+      case _SortOption.dateOldest:
+        return Icons.calendar_today;
+    }
+  }
+}
+
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
 
@@ -16,6 +47,7 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   List<SavedRoute> _routes = [];
   bool _isLoading = true;
+  _SortOption _sortOption = _SortOption.dateNewest;
 
   @override
   void initState() {
@@ -33,14 +65,96 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  /// Returns a sorted copy of [_routes] according to the current [_sortOption].
+  List<SavedRoute> get _sortedRoutes {
+    final list = List<SavedRoute>.from(_routes);
+    switch (_sortOption) {
+      case _SortOption.nameAsc:
+        list.sort((a, b) =>
+            a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        break;
+      case _SortOption.nameDesc:
+        list.sort((a, b) =>
+            b.name.toLowerCase().compareTo(a.name.toLowerCase()));
+        break;
+      case _SortOption.dateNewest:
+        list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        break;
+      case _SortOption.dateOldest:
+        list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        break;
+    }
+    return list;
+  }
+
   Future<void> _deleteRoute(String id) async {
     await RouteDatabase.instance.deleteRoute(id);
     await _loadRoutes();
   }
 
+  void _showSortSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  'Sort routes by',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+              const Divider(height: 1),
+              ..._SortOption.values.map((option) {
+                final selected = option == _sortOption;
+                return ListTile(
+                  leading: Icon(option.icon,
+                      color: selected
+                          ? Theme.of(context).colorScheme.primary
+                          : null),
+                  title: Text(option.label),
+                  trailing: selected
+                      ? Icon(Icons.check,
+                          color: Theme.of(context).colorScheme.primary)
+                      : null,
+                  onTap: () {
+                    setState(() => _sortOption = option);
+                    Navigator.pop(ctx);
+                  },
+                );
+              }),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Show the sort button in the app bar only when there are routes.
+      appBar: _routes.isEmpty
+          ? null
+          : AppBar(
+              automaticallyImplyLeading: false,
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.sort),
+                  tooltip: 'Sort routes',
+                  onPressed: _showSortSheet,
+                ),
+              ],
+            ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _routes.isEmpty
@@ -68,11 +182,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Widget _buildRouteList(BuildContext context) {
+    final sorted = _sortedRoutes;
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: _routes.length,
+      itemCount: sorted.length,
       itemBuilder: (context, index) {
-        final route = _routes[index];
+        final route = sorted[index];
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           child: InkWell(
@@ -82,13 +197,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 MaterialPageRoute(
                   builder: (context) => RouteDetailScreen(
                     route: route,
-                    // When the detail screen deletes the route, remove it from
-                    // the database and refresh the list.
                     onDeleted: () => _deleteRoute(route.id),
                   ),
                 ),
               );
-              // Also refresh if anything else changed (e.g. edits).
+              // Refresh in case anything changed (edits, sharing, etc.).
               _loadRoutes();
             },
             onLongPress: () =>

@@ -42,10 +42,30 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
   Offset? _displayedImageOffset;
   bool _isExporting = false;
 
+  // ── Shared-status local state ─────────────────────────────────────────────
+  // We load the initial value once in initState so the icon is correct from
+  // the moment the screen opens, then flip it locally on every tap so there
+  // is no round-trip delay before the icon updates.
+  bool _isShared = false;
+  bool _sharedStatusLoaded = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _computeImageLayout());
+    _loadSharedStatus();
+  }
+
+  Future<void> _loadSharedStatus() async {
+    if (!AuthService.instance.isLoggedIn) return;
+    final shared =
+        await FriendsService.instance.isRouteShared(widget.route.id);
+    if (mounted) {
+      setState(() {
+        _isShared = shared;
+        _sharedStatusLoaded = true;
+      });
+    }
   }
 
   void _computeImageLayout() {
@@ -76,7 +96,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
       );
     });
   }
-  // --- Duplicate ------ (i cant do the chatgpt thing)
+
+  // ── Duplicate ─────────────────────────────────────────────────────────────
   Future<void> _duplicateRoute() async {
     final newId = DateTime.now().millisecondsSinceEpoch.toString();
     final original = widget.route;
@@ -102,6 +123,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
       );
     }
   }
+
   // ── Delete ────────────────────────────────────────────────────────────────
 
   Future<void> _confirmDelete() async {
@@ -125,6 +147,49 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
     if (confirmed == true && mounted) {
       widget.onDeleted?.call();
       Navigator.pop(context);
+    }
+  }
+
+  // ── Share toggle ──────────────────────────────────────────────────────────
+
+  Future<void> _toggleShared() async {
+    // Flip the icon immediately for instant visual feedback.
+    final wasShared = _isShared;
+    setState(() => _isShared = !_isShared);
+
+    try {
+      if (wasShared) {
+        await FriendsService.instance.unshareRoute(widget.route.id);
+      } else {
+        String? imageUrl;
+        if (widget.route.imageBytes != null) {
+          imageUrl = await FriendsService.instance
+              .uploadRouteImage(widget.route.id, widget.route.imageBytes!);
+        }
+        await FriendsService.instance
+            .shareRoute(widget.route, imageUrl ?? '');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(wasShared
+                ? 'Route unshared'
+                : 'Route shared with friends!'),
+          ),
+        );
+      }
+    } catch (e) {
+      // Revert the optimistic update if the call failed.
+      if (mounted) {
+        setState(() => _isShared = wasShared);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not update share status: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -249,42 +314,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
               tooltip: 'Export image',
               onPressed: _shareImage,
             ),
-            // Share with friends — only when logged in
-            if (AuthService.instance.isLoggedIn)
-              FutureBuilder<bool>(
-                future: FriendsService.instance.isRouteShared(widget.route.id),
-                builder: (context, snapshot) {
-                  final isShared = snapshot.data ?? false;
-                  return IconButton(
-                    icon: Icon(isShared ? Icons.public : Icons.public_off),
-                    tooltip: isShared
-                        ? 'Shared with friends (tap to unshare)'
-                        : 'Share with friends',
-                    onPressed: () async {
-                      if (isShared) {
-                        await FriendsService.instance.unshareRoute(widget.route.id);
-                      } else {
-                        String? imageUrl;
-                        if (widget.route.imageBytes != null) {
-                          imageUrl = await FriendsService.instance
-                              .uploadRouteImage(widget.route.id, widget.route.imageBytes!);
-                        }
-                        await FriendsService.instance
-                            .shareRoute(widget.route, imageUrl ?? '');
-                      }
-                      setState(() {});
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(isShared
-                                ? 'Route unshared'
-                                : 'Route shared with friends!'),
-                          ),
-                        );
-                      }
-                    },
-                  );
-                },
+            // Share with friends — only when logged in.
+            // Uses local _isShared state so the icon flips instantly on tap.
+            if (AuthService.instance.isLoggedIn && _sharedStatusLoaded)
+              IconButton(
+                icon: Icon(_isShared ? Icons.public : Icons.public_off),
+                tooltip: _isShared
+                    ? 'Shared with friends (tap to unshare)'
+                    : 'Share with friends',
+                onPressed: _toggleShared,
               ),
           ],
           IconButton(
@@ -430,8 +468,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
                     Text('Hold Sequence',
                         style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 12),
-                    // Holds are already sorted by selectionOrder when saved;
-                    // enumerate them with their stored selectionOrder number.
                     ...route.selectedHolds
                         .asMap()
                         .entries
@@ -461,9 +497,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
       final dispH = hold.height * scale;
       final color = _roleColor(hold.role);
 
-      // The sequence number to display: use selectionOrder when available,
-      // otherwise fall back to list position + 1 for routes saved before
-      // the selectionOrder feature was introduced.
       final selected = route.selectedHolds;
       final displayNumber = hold.selectionOrder ??
           (selected.indexOf(hold) + 1);
@@ -500,9 +533,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
 
   // ── Sequence list ─────────────────────────────────────────────────────────
 
-  /// Builds one row in the "Hold Sequence" list.
-  /// Uses [hold.selectionOrder] as the displayed step number, falling back
-  /// to list index + 1 for routes saved before the feature was introduced.
   Widget _buildSequenceRow(ClimbingHold hold) {
     final color = _roleColor(hold.role);
     final roleText = _roleText(hold.role);
@@ -689,11 +719,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
 
 // ── Sequence connector painter ────────────────────────────────────────────────
 
-/// Draws dashed lines with arrowheads between hold centres in sequence order.
-///
-/// Rendered as a [CustomPaint] layer sitting between the wall image and the
-/// hold-box widgets, so lines appear under the numbered boxes but above the
-/// photo. Also included inside the [RepaintBoundary] so exports capture them.
 class _SequenceLinePainter extends CustomPainter {
   final List<ClimbingHold> holds;
   final Size imageSize;
@@ -713,7 +738,6 @@ class _SequenceLinePainter extends CustomPainter {
 
     final scale = displayedSize.width / imageSize.width;
 
-    // Sort by selectionOrder; fall back to list index for legacy routes.
     final ordered = holds.toList()
       ..sort((a, b) {
         final ao = a.selectionOrder ?? holds.indexOf(a) + 1;
@@ -721,7 +745,6 @@ class _SequenceLinePainter extends CustomPainter {
         return ao.compareTo(bo);
       });
 
-    // Convert image-space centre to display-space centre.
     Offset toDisplay(ClimbingHold h) => Offset(
           h.position.dx * scale + displayedOffset.dx,
           h.position.dy * scale + displayedOffset.dy,
@@ -743,8 +766,6 @@ class _SequenceLinePainter extends CustomPainter {
       final from = toDisplay(ordered[i]);
       final to = toDisplay(ordered[i + 1]);
 
-      // Shorten each end so the line starts/ends at the hold box edge
-      // rather than at the centre, keeping arrows clear of the number badge.
       final shortened = _shortenSegment(
         from, to,
         startGap: ordered[i].width * scale / 2 + 4,
@@ -754,17 +775,14 @@ class _SequenceLinePainter extends CustomPainter {
 
       final (p1, p2) = shortened;
 
-      // Draw dashed shadow then dashed white line for contrast on any bg.
       _drawDashed(canvas, p1, p2, shadowPaint);
       _drawDashed(canvas, p1, p2, linePaint);
 
-      // Arrowhead at the destination end.
       _drawArrowhead(canvas, p1, p2, shadowPaint, size: 10);
       _drawArrowhead(canvas, p1, p2, linePaint, size: 8);
     }
   }
 
-  /// Returns shortened (start, end) points, or null if the holds overlap.
   (Offset, Offset)? _shortenSegment(
     Offset from,
     Offset to, {
