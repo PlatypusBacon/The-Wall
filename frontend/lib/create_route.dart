@@ -28,7 +28,7 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
   // ── Services ──────────────────────────────────────────────────────────────
 
   final HoldDetectionService _detectionService = HoldDetectionService(
-    confidenceThreshold: 0.755,
+    confidenceThreshold: 0.50,
     inputSize: (width: 320, height: 320),
     numThreads: 2,
   );
@@ -52,7 +52,15 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
   // ── Hold / editor state (consumed by mixin via @override getters) ─────────
 
   @override
-  List<ClimbingHold> detectedHolds = [];
+  List<ClimbingHold> _rawDetectedHolds = [];
+  double _confidenceThreshold = 0.50;
+
+  @override
+  List<ClimbingHold> get detectedHolds =>
+      _rawDetectedHolds.where((h) => h.confidence >= _confidenceThreshold || h.confidence == 1.0).toList();
+
+  @override
+  set detectedHolds(List<ClimbingHold> holds) => _rawDetectedHolds = holds;
 
   @override
   HoldRole currentSelectionMode = HoldRole.middle;
@@ -129,7 +137,7 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
         maxWidth: 2048,
         maxHeight: 2048,
       );
-      if (picked == null) return;
+      if (picked == null || !mounted) return;
 
       setState(() {
         _isAnalyzing = true;
@@ -138,6 +146,7 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
       });
 
       final bytes = await picked.readAsBytes();
+      if (!mounted) return;
       setState(() {
         _selectedImageBytes = bytes;
         if (!kIsWeb) _selectedImage = File(picked.path);
@@ -145,6 +154,7 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
 
       await _detectHolds();
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Failed to load image: $e';
         _isAnalyzing = false;
@@ -600,7 +610,24 @@ class _CreateRouteScreenState extends State<CreateRouteScreen>
               onDeselect: () => setState(() => editingHold = null),
             ),
           ],
-
+          Row(
+            children: [
+              const Icon(Icons.filter_alt, size: 16, color: Colors.grey),
+              Expanded(
+                child: Slider(
+                  value: _confidenceThreshold,
+                  min: 0.1,
+                  max: 0.95,
+                  label: '${(_confidenceThreshold * 100).toInt()}%',
+                  onChanged: (v) => setState(() => _confidenceThreshold = v),
+                ),
+              ),
+              Text(
+                '${(_confidenceThreshold * 100).toInt()}% sure',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
